@@ -26,6 +26,10 @@ metadata:
 
 Broadcast a message to multiple OpenClaw agents at once and aggregate their responses.
 
+## Summary
+
+**agent-party** is an OpenClaw skill that lets you fan out a single message to multiple agents in parallel and collect all their responses in one place. It is useful for group coordination, parallel task processing, and comparing outputs across different agent configurations. The skill exposes a simple CLI (`skill.js`) with two commands: `broadcast` (send a prompt to one or more agents) and `discover` (list reachable agents).
+
 ## When to Use
 
 ✅ **USE this skill when:**
