@@ -1,0 +1,11 @@
+{
+  "name": "openclaw-agent-party",
+  "version": "0.1.0",
+  "description": "OpenClaw skill: broadcast messages to multiple agents simultaneously",
+  "main": "skills/agent-party/skill.js",
+  "scripts": {
+    "start": "node skills/agent-party/skill.js"
+  },
+  "keywords": ["openclaw", "skill", "multi-agent", "broadcast"],
+  "license": "MIT"
+}
