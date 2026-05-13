@@ -30,6 +30,96 @@ The goal is to **benefit from model diversity** — different underlying models 
 
 ---
 
+## Agent Discovery and Session Filter
+
+Before starting any roundtable, discover which agents are actually running and reachable. This step determines whether to use **real agent sessions** (preferred) or fall back to **solo spawn mode**.
+
+### Step 1 — List Active Sessions
+
+```
+sessions_list(
+  kinds: ["main"],          // main sessions only — skip threads, hooks, cron
+  activeMinutes: 60,        // agents active in the last hour
+  includeLastMessage: true  // helps identify what each agent is doing
+)
+```
+
+Returns an array of session objects. Relevant fields:
+
+| Field | Use |
+|---|---|
+| `sessionKey` | Passed to `sessions_send` and `sessions_history` |
+| `agentId` | Used to exclude own session and for exact-match filtering |
+| `label` | Human-readable agent name — used for display and name-based filtering |
+
+### Step 2 — Filter by Name or Role (when `--agent` is specified)
+
+If the user named specific agents (via `--agent <name>` or @-mention), narrow the list:
+
+```
+matching = sessions.filter(s =>
+  s.label.toLowerCase().includes(target.toLowerCase())
+  || s.agentId === target
+)
+```
+
+For role-based filtering, pass the term directly into `sessions_list` instead:
+
+```
+sessions_list(kinds: ["main"], activeMinutes: 60, search: "engineer")
+```
+
+The `search` parameter does full-text matching against session metadata.
+
+### Step 3 — Exclude Own Session
+
+Your own session appears in the results. Remove it:
+
+```
+others = sessions.filter(s => s.sessionKey !== ownSessionKey)
+```
+
+**How to identify own session:** OpenClaw provides the current session key in the execution context. If it is not directly accessible, fall back to comparing `s.agentId` against your own agent identifier, or exclude the session whose label matches your own name.
+
+### Step 4 — Handle Empty and Undersized Results
+
+| `others` size | Action |
+|---|---|
+| 0 (no agents active) | Announce: *"No other agents are currently available. Running in solo mode."* → proceed with `--solo` |
+| 1 agent | Announce: *"Only [Agent] is available. Continuing as a 1-on-1."* → proceed with just that agent |
+| 2–4 agents | Proceed with roundtable |
+| > 4 agents | Cap at 4 for coherence: `others = others.slice(0, 4)` |
+
+If `--agent` was specified but no session matched: ask the user whether to include all available agents or abort.
+
+If `--agent` was not specified but no agents are active: announce and fall back to `--solo` automatically.
+
+### Step 5 — Build the Agent Roster
+
+Collect `{ sessionKey, label }` for each selected agent. This roster is the input to the broadcast loop:
+
+```
+roster = [
+  { sessionKey: "agent:main:main", label: "Amelia" },
+  { sessionKey: "agent:work:main", label: "Winston" },
+  ...
+]
+```
+
+Pass `roster` into `sessions_send` and `sessions_history` in all subsequent steps. Never hard-code session keys — always derive them from the discovery step.
+
+### Solo Mode Fallback
+
+When `others` is empty after filtering, or when `--solo` is passed explicitly:
+
+- Skip `sessions_list` and `sessions_send` entirely
+- Spawn a subagent for each "agent" persona instead
+- The roundtable script (Sections 1–6 below) is identical — only the delivery mechanism differs
+
+This ensures the skill works even when no other agents are running or reachable.
+
+---
+
 ## The Core Loop
 
 ### 1. Receive the Meeting Topic
@@ -50,7 +140,12 @@ Default group size: **3-4 agents** per topic. More than 4 and the meeting loses 
 
 ### 3. Invite Each Agent — One at a Time
 
-For each agent in order, spawn them with:
+For each agent in order, send them the meeting prompt. Use the delivery method that matches the mode determined in **Agent Discovery**:
+
+- **Real session mode** (`roster` is non-empty): call `sessions_send(sessionKey, message, timeoutSeconds=30)` per agent. Collect the reply from the return value.
+- **Solo mode** (`--solo` or no agents found): spawn a subagent with the prompt below.
+
+Message/spawn template:
 
 ```
 You are {name} ({title}), participating in a roundtable meeting.
