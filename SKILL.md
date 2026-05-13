@@ -1,3 +1,22 @@
+---
+name: agent-party
+description: >
+  Run a sequential roundtable meeting with multiple OpenClaw agents. Each
+  agent is consulted one at a time and may respond or pass. Use when you want
+  a structured multi-agent discussion where model diversity is a feature —
+  agents on different underlying models contribute genuinely different
+  perspectives. Adapted from BMAD party mode (parallel), this variant is
+  sequential.
+metadata:
+  {
+    "openclaw":
+      {
+        "emoji": "🎉",
+        "os": ["darwin", "linux"],
+      },
+  }
+---
+
 # Party Mode — Meeting Skill
 ## For the Hackathon Repo
 
@@ -126,13 +145,3 @@ When the user signals the meeting is done, close with a brief summary of where a
 
 User says they're done (any natural phrasing). Give a 2-3 sentence summary of key convergences and divergences. Return to normal mode.
 
----
-
-## SKILL.md Frontmatter
-
-```yaml
----
-name: party-mode-meeting
-description: 'Run a sequential roundtable meeting with multiple agents. Each agent is consulted one at a time and may respond or pass. Use when the user wants a structured multi-agent discussion where model diversity is a feature — agents on different underlying models genuinely contribute different perspectives. Compare: BMAD party mode (parallel), which this is adapted from.'
----
-```
