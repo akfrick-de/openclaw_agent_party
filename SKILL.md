@@ -1,12 +1,12 @@
 ---
 name: agent-party
 description: >
-  Run a sequential roundtable meeting with multiple OpenClaw agents. Each
-  agent is consulted one at a time and may respond or pass. Use when you want
-  a structured multi-agent discussion where model diversity is a feature —
-  agents on different underlying models contribute genuinely different
-  perspectives. Adapted from BMAD party mode (parallel), this variant is
-  sequential.
+  Run a multi-round roundtable meeting with multiple OpenClaw agents. Each
+  round broadcasts the topic to all agents simultaneously, collects their
+  contributions (including Actionables), shares results back, then refines
+  in the next round. Use when you want structured multi-agent collaboration
+  where model diversity produces genuinely different perspectives and
+  concrete, owned next steps.
 metadata:
   {
     "openclaw":
@@ -24,9 +24,11 @@ metadata:
 
 ## Overview
 
-This is a **roundtable meeting mode** for multi-agent conversations. Unlike BMAD party mode (parallel subagent responses), this variant is **sequential** — agents are consulted one at a time, each brings their model-specific perspective, and each independently decides whether they have something to add.
+This is a **broadcast roundtable mode** for multi-agent collaboration. Every agent receives the same prompt simultaneously (fire-and-forget), their contributions are collected, shared back with the group, and the next round refines based on what everyone said.
 
 The goal is to **benefit from model diversity** — different underlying models genuinely reason differently. The same question seen through Opus, Haiku, Qwen3-Coder-Next, and GPT-oss-120b produces four genuinely different lenses, not four polished versions of the same answer.
+
+Each agent also defines **Actionables** — concrete things they personally own — so the meeting ends with a structured, grouped list of who does what.
 
 ---
 
@@ -114,104 +116,160 @@ When `others` is empty after filtering, or when `--solo` is passed explicitly:
 
 - Skip `sessions_list` and `sessions_send` entirely
 - Spawn a subagent for each "agent" persona instead
-- The roundtable script (Sections 1–6 below) is identical — only the delivery mechanism differs
+- The roundtable script below is identical — only the delivery mechanism differs
 
 This ensures the skill works even when no other agents are running or reachable.
 
 ---
 
-## The Core Loop
+## The Broadcast-Collect-Share Cycle
 
-### 1. Receive the Meeting Topic
+Repeat for each round `r` from 1 to `--rounds` (default: 2).
 
-The user poses a question, problem, or topic to the group. You frame it for the room:
+---
 
-> *"I've brought together [list agents] to discuss: **[topic]**."*
+### Phase 1 — Broadcast
 
-### 2. Pick an Agent Order
-
-Choose the order based on relevance and the kind of thinking you want to prime:
-
-- **Lead with an agent whose expertise anchors the topic** — they set the frame
-- **Follow with agents from different model families** — they react to the anchor with a different lens
-- **Vary the order round to round** — don't always start with the same agent
-
-Default group size: **3-4 agents** per topic. More than 4 and the meeting loses coherence. Fewer than 3 and you lose the model-diversity advantage.
-
-### 3. Invite Each Agent — One at a Time
-
-For each agent in order, send them the meeting prompt. Use the delivery method that matches the mode determined in **Agent Discovery**:
-
-- **Real session mode** (`roster` is non-empty): call `sessions_send(sessionKey, message, timeoutSeconds=30)` per agent. Collect the reply from the return value.
-- **Solo mode** (`--solo` or no agents found): spawn a subagent with the prompt below.
-
-Message/spawn template:
+Send the round prompt to **all agents simultaneously** using fire-and-forget:
 
 ```
-You are {name} ({title}), participating in a roundtable meeting.
+for agent in roster:
+  sessions_send(
+    sessionKey: agent.sessionKey,
+    message: round_prompt(r, topic, prior_digest),
+    timeoutSeconds: 0   // fire-and-forget — do not block
+  )
+```
 
-## Your Persona
-{icon} {name} — {description}
+`timeoutSeconds: 0` means the call returns immediately without waiting for a reply. This is the only way to achieve parallel delivery, since `sessions_send` is one-to-one and `SUBAGENT_TOOL_DENY_ALWAYS` blocks parallel subagents from calling it.
 
-## The Meeting Topic
+**Important:** `sessions_send` is only callable from the main agent session. Never attempt to fan out via spawned subagents.
+
+#### Round 1 Prompt Template
+
+```
+You are {name}, a knight at the roundtable.
+
+## The Topic
 {topic as stated by the facilitator}
 
-## Discussion So Far
-{summary of what previous agents said this round — keep under 300 words}
-{if no prior responses, omit this section}
-
-## Your Model
-You are running on {model}. Remember: your model has specific strengths and blind spots. Lean into what your model is genuinely good at, and flag what it struggles with.
+## Your Role
+{name} — {one-line description of this agent's model/specialty}
 
 ## Guidelines
-- You may respond OR pass. If you have nothing substantive to add to what's already been said, say so briefly and pass your turn.
-- Start your response with: {icon} **{name}:**
-- Respond authentically as {name}. Don't repeat or rephrase what others said — build on it, challenge it, or add a dimension they missed.
-- If you agree with a prior response, say why in your own words rather than just endorsing.
-- Disagree openly when your perspective tells you to. Don't hedge or soften.
-- If the question is outside your expertise, say so — don't improvise.
-- Scale your response to the substance. A brief point = a brief answer. Complex topic = give it the depth it needs.
-- You may ask the facilitator to clarify the topic before responding.
-- Do NOT use tools. Just respond with your perspective.
+- Respond with your genuine perspective on the topic.
+- End your response with a section called **Actionables** — 3 to 5 specific, concrete things that YOU will do or own related to this topic. Use checkbox format:
+  - [ ] Action 1
+  - [ ] Action 2
+- If you have nothing substantive to contribute, say so briefly. You may still list Actionables if you have clear ownership.
+- Do NOT use tools. Just respond with your perspective and Actionables.
 ```
 
-### 4. Agents May React to Each Other
+#### Round 2..N Prompt Template
 
-After each agent responds, **ask the remaining agents if they want to react**:
-
-> *"Winston, do you want to respond to what Sally just said? Pass is fine."*
-
-Agents can:
-- **Build** on a prior response (add a dimension, provide evidence)
-- **Challenge** a prior response (disagree, flag a blind spot)
-- **Pass** (nothing to add — this is valid and encouraged)
-
-This is where model diversity pays off — one model's blind spot is another model's specialty.
-
-### 5. Present the Full Meeting
-
-After all agents have spoken (or passed), present the full exchange to the user:
-
-- Each agent's response in full — unabridged, in their own voice
-- A note when an agent passed ("_Winston passed — nothing to add_")
-- Agent-to-agent reactions included as part of the relevant agent's turn
-
-Format:
 ```
-## Meeting: [topic]
+You are {name}, a knight at the roundtable — Round {r} of {total_rounds}.
 
-[Agent A response]
+## The Topic
+{topic}
 
-[Agent B response or "Agent B passed"]
+## What Your Peers Contributed in Round {r-1}
+{prior_digest — one paragraph per agent, max 150 words each}
 
-[Agent A reacts to B]
+## Your Task This Round
+Refine your position based on what you've heard. Build on, challenge, or confirm the contributions above.
 
-[Agent C response]
+End your response with an updated **Actionables** section — keep, drop, or add items based on this round's discussion.
 ```
 
-### 6. Wrap-Up
+---
 
-When the user signals the meeting is done, close with a brief summary of where agents converged, where they diverged, and any open questions the group didn't resolve.
+### Phase 2 — Collect
+
+After broadcasting, wait briefly then poll each agent for their reply using `sessions_history`:
+
+```
+replies = {}
+for agent in roster:
+  history = sessions_history(sessionKey: agent.sessionKey, limit: 5)
+  // take the most recent assistant message posted after the broadcast
+  replies[agent.label] = extract_latest_reply(history, after: broadcast_timestamp)
+```
+
+If an agent hasn't replied yet, wait up to 30 seconds total (poll every 5 s) before marking them as "no response this round."
+
+---
+
+### Phase 3 — Share Digest
+
+Compile a **round digest** from all replies and display it to the user:
+
+```
+## Round {r} — Contributions
+
+**{Agent A}:**
+{Agent A's response, capped at 200 words if very long}
+
+**Actionables:**
+- [ ] {A1}
+- [ ] {A2}
+
+---
+
+**{Agent B}:**
+{Agent B's response}
+
+**Actionables:**
+- [ ] {B1}
+
+---
+
+_{Agent C} passed — nothing to add._
+```
+
+Store the digest as `prior_digest` for Round `r+1`.
+
+---
+
+### Phase 4 — Refine (Rounds 2..N)
+
+After sharing the digest with the user, start Round `r+1`: broadcast the Round 2..N prompt (which includes `prior_digest`) to all agents again. Repeat Phases 1–3.
+
+---
+
+## Final Aggregation
+
+After the last round, collect **all Actionables** from all agents across all rounds and present a grouped summary:
+
+```
+## Roundtable Summary — [topic]
+
+### Actionables by Topic
+
+**[Topic Group A]**
+| Owner | Action |
+|---|---|
+| {Agent} | {Actionable} |
+| {Agent} | {Actionable} |
+
+**[Topic Group B]**
+| Owner | Action |
+|---|---|
+| {Agent} | {Actionable} |
+
+### Convergences
+- {Points where 2+ agents agreed}
+
+### Divergences
+- {Points where agents disagreed — note which agent held which position}
+
+### Open Questions
+- {Questions the group raised but did not resolve}
+```
+
+**De-duplication:** If two agents listed the same Actionable, merge into one row and list both owners.
+
+**Grouping:** Use the topic itself to determine logical groups (e.g., "Architecture", "Testing", "UX"). If the topic is narrow, one group is fine.
 
 ---
 
@@ -219,24 +277,27 @@ When the user signals the meeting is done, close with a brief summary of where a
 
 | Situation | What to do |
 |---|---|
-| Agent passes | Note it, move to next. Don't retry. |
-| All agents pass | Ask the user if they want to reframe the question |
-| Agent goes off-topic | Gently redirect in the next spawn prompt |
+| Agent passes | Note it in the digest. Don't retry. |
+| All agents pass | Ask the user if they want to reframe the topic |
+| Agent doesn't reply in 30 s | Mark as "no response this round" and continue |
+| Agent goes off-topic | Include their response but note the drift; refocus in next round's prompt |
 | Agent overlaps with prior response | Let it stand — different phrasing has value |
-| User wants a specific agent only | Spawn just that agent with the full discussion context |
-| Topic shifts mid-meeting | Start a new meeting round with relevant agents |
+| User wants a specific agent only | Include only that agent's `sessionKey` in the roster |
+| Topic shifts mid-meeting | Reset `prior_digest`, start a new Round 1 |
+| All rounds done but user wants more | Ask if they want another round or a summary |
 
 ---
 
 ## Arguments
 
-- `--solo` — Skip subagents. Roleplay all agents yourself. Use when subagents are unavailable or speed matters more than independence.
+- `--rounds <n>` — Number of broadcast-collect-share cycles. Default: `2`. Minimum: `1`.
+- `--agents <name,...>` — Restrict the roster to named agents (comma-separated). Default: all active agents up to the 4-agent cap. Accepts partial name matches.
+- `--solo` — Skip real sessions entirely. Roleplay all agents yourself as subagents. Use when no other agents are running or speed matters more than independence.
 - `--model <model>` — Force all agents to use the same model. Overrides the natural model diversity of the group.
-- `--agent <code>` — Include a specific agent regardless of topic relevance (e.g., `--agent amelia`).
+- `--agent <code>` — Include one specific agent by name or ID regardless of the normal filter (e.g., `--agent amelia`). Can be repeated.
 
 ---
 
 ## Exit
 
-User says they're done (any natural phrasing). Give a 2-3 sentence summary of key convergences and divergences. Return to normal mode.
-
+User says they're done (any natural phrasing). Output the Final Aggregation section. Return to normal mode.
